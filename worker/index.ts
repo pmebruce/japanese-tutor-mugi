@@ -3,7 +3,7 @@ import { systemPrompt, reminderPrompt, JUDGE_PROMPT, TIP_FIX_SYSTEM, LOOKUP_SYST
 import { CHAT_REPLY_SCHEMA, JUDGE_SCHEMA, TIP_FIX_SCHEMA, LOOKUP_SCHEMA } from './schemas.ts';
 import { readSSE } from '../server/llm/openaiProvider.ts';
 import { nameText, personaText } from '../src/game/claudeProtocol.ts';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
+import { createSession, sessionAuthorized, sessionCookie, sameOrigin, passwordConfigured, passwordMatches, loginPage, readPassword, privateHeaders } from './passwordAuth.ts';
 
 export interface Storage {
   get<T>(key: string): Promise<T | undefined>;
@@ -16,9 +16,6 @@ interface Env {
   MUGI_ACCESS_CODE?: string;
   OPENAI_MODEL?: string;
   MUGI_DAILY_REQUESTS?: string;
-  ACCESS_TEAM_DOMAIN?: string;
-  ACCESS_AUD?: string;
-  MUGI_OWNER_EMAIL?: string;
   USAGE: { idFromName(name: string): unknown; get(id: unknown): { fetch(request: Request): Promise<Response> } };
 }
 type Ledger = { day: string; requests: number; minute: number; minuteRequests: number; inputTokens: number; outputTokens: number };
@@ -27,29 +24,20 @@ const json = (value: unknown, status = 200) => Response.json(value, { status, he
 const error = (message: string, status = 400) => json({ ok: false, message }, status);
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
 const dailyLimit = (env: Env) => Math.max(1, Math.min(1000, Number(env.MUGI_DAILY_REQUESTS) || 100));
-const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
-
-/** Cloudflare Access identity is verified server-side. A forged identity header cannot grant access. */
-async function ownerAuthorized(req: Request, env: Env): Promise<boolean> {
-  const domain = env.ACCESS_TEAM_DOMAIN;
-  if (!domain || !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(domain) || !env.ACCESS_AUD || !env.MUGI_OWNER_EMAIL) return false;
-  const assertion = req.headers.get('Cf-Access-Jwt-Assertion');
-  if (!assertion) return false;
-  try {
-    const issuer = `https://${domain}`;
-    let keys = jwksCache.get(domain);
-    if (!keys) { keys = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`)); jwksCache.set(domain, keys); }
-    const { payload } = await jwtVerify(assertion, keys, { issuer, audience: env.ACCESS_AUD, requiredClaims: ['exp', 'iat', 'sub'], algorithms: ['RS256'] });
-    return typeof payload.email === 'string' && payload.email.toLowerCase() === env.MUGI_OWNER_EMAIL.toLowerCase();
-  } catch { return false; }
-}
-
 /** One durable, transactionally reserved quota for this personal installation. Restarts do not reset it. */
 export class UsageLimiter {
   constructor(private state: { storage: Storage }) {}
   async fetch(req: Request): Promise<Response> {
-    const body = await req.json() as { action: string; limit?: number; inputTokens?: number; outputTokens?: number };
+    const body = await req.json() as { action: string; ip?: string; limit?: number; inputTokens?: number; outputTokens?: number };
     return this.state.storage.transaction(async storage => {
+      if (body.action === 'login') {
+        const now = Date.now();
+        const recent = (await storage.get<{ ip: string; at: number }[]>('loginAttempts') ?? []).filter(a => now - a.at < 15 * 60000);
+        if (recent.length >= 60 || recent.filter(a => a.ip === body.ip).length >= 8) return error('登入嘗試太頻繁，請等 15 分鐘再試。', 429);
+        recent.push({ ip: body.ip ?? 'unknown', at: now });
+        await storage.put('loginAttempts', recent);
+        return json({ ok: true });
+      }
       const old = await storage.get<Ledger>('ledger');
       const minute = Math.floor(Date.now() / 60000);
       const data: Ledger = old?.day === today() ? old : { day: today(), requests: 0, minute, minuteRequests: 0, inputTokens: 0, outputTokens: 0 };
@@ -71,15 +59,6 @@ export class UsageLimiter {
 async function usage(env: Env, action: string, extra = {}): Promise<Response> {
   const stub = env.USAGE.get(env.USAGE.idFromName('personal-mobile'));
   return stub.fetch(new Request('https://usage.internal/', { method: 'POST', body: JSON.stringify({ action, limit: dailyLimit(env), ...extra }) }));
-}
-async function authorized(req: Request, code: string): Promise<boolean> {
-  const received = req.headers.get('X-Mugi-Pair') ?? '';
-  if (!received || received.length > 128) return false;
-  const hash = async (s: string) => new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
-  const [a, b] = await Promise.all([hash(received), hash(code)]);
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-  return diff === 0;
 }
 function textField(body: Record<string, unknown>, key: string, max: number): string {
   const value = body[key];
@@ -116,10 +95,10 @@ function upstreamMessage(status: number, code?: string): string {
 
 export async function handleApi(req: Request, env: Env, fetcher: typeof fetch = fetch): Promise<Response> {
   const path = new URL(req.url).pathname;
-  if (!env.OPENAI_API_KEY || !env.MUGI_ACCESS_CODE || env.MUGI_ACCESS_CODE.length < 12) return error('手機版尚未完成連線設定，請先設定 API 金鑰與至少 12 字的私人使用碼。', 503);
+  if (!env.OPENAI_API_KEY || !passwordConfigured(env.MUGI_ACCESS_CODE)) return error('手機版尚未完成連線設定，請先設定 API 金鑰與至少 16 字的私人密碼。', 503);
   const origin = req.headers.get('Origin');
   if ((origin && origin !== new URL(req.url).origin) || req.headers.get('Sec-Fetch-Site') === 'cross-site') return error('不接受跨網站請求。', 403);
-  if (!await authorized(req, env.MUGI_ACCESS_CODE)) return json({ error: 'pair_required', message: '請輸入私人使用碼。' }, 403);
+  if (!await sessionAuthorized(req, env.MUGI_ACCESS_CODE)) return json({ error: 'login_required', message: '登入已到期，請重新登入。' }, 401);
   const model = env.OPENAI_MODEL || 'gpt-4.1-mini';
   if (req.method === 'GET') {
     if (path === '/api/chat/status') return json({ ok: true, model, personas: { Mugi: defaultPersona('Mugi') } });
@@ -205,10 +184,37 @@ export async function handleApi(req: Request, env: Env, fetcher: typeof fetch = 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     try {
-      // Fail closed until the owner-only Access application is configured. Also protects static assets.
-      if (!await ownerAuthorized(req, env)) return new Response('私人日語家教：請使用擁有者帳號登入。若尚未部署完成，請先設定 Cloudflare Access。', { status: 403, headers: { ...headers, 'Content-Type': 'text/plain; charset=utf-8' } });
-      if (new URL(req.url).pathname.startsWith('/api/')) return await handleApi(req, env);
-      return env.ASSETS.fetch(req);
+      const path = new URL(req.url).pathname;
+      if (!passwordConfigured(env.MUGI_ACCESS_CODE)) return new Response('私人日語家教尚未設定完成，請擁有者在 Cloudflare 設定至少 16 字的 MUGI_ACCESS_CODE Secret。', { status: 503, headers: { ...privateHeaders, 'Content-Type': 'text/plain; charset=utf-8' } });
+      if (path === '/auth/login') {
+        if (req.method === 'GET') return loginPage();
+        if (req.method !== 'POST') return error('不支援此操作。', 405);
+        if (!sameOrigin(req)) return error('不接受跨網站請求。', 403);
+        // Cloudflare supplies CF-Connecting-IP; never trust client X-Forwarded-For.
+        const ip = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(req.headers.get('CF-Connecting-IP') ?? 'unknown'))), b => b.toString(16).padStart(2, '0')).join('');
+        const allowed = await usage(env, 'login', { ip });
+        if (!allowed.ok) return loginPage('登入嘗試太頻繁，請等 15 分鐘再試。', 429);
+        let password: string;
+        try { password = await readPassword(req); } catch { return loginPage('請檢查密碼格式。', 400); }
+        if (!await passwordMatches(password, env.MUGI_ACCESS_CODE)) return loginPage('密碼不正確，請再試一次。', 401);
+        const token = await createSession(env.MUGI_ACCESS_CODE, new URL(req.url).origin);
+        return new Response(null, { status: 303, headers: { ...privateHeaders, Location: '/', 'Set-Cookie': sessionCookie(token) } });
+      }
+      if (path === '/auth/logout') {
+        if (req.method !== 'POST') return error('不支援此操作。', 405);
+        if (!sameOrigin(req)) return error('不接受跨網站請求。', 403);
+        return new Response(null, { status: 303, headers: { ...privateHeaders, Location: '/auth/login', 'Set-Cookie': sessionCookie('', true) } });
+      }
+      if (!await sessionAuthorized(req, env.MUGI_ACCESS_CODE)) {
+        if (path.startsWith('/api/')) return json({ error: 'login_required', message: '請先登入。' }, 401);
+        if (req.method === 'GET' && req.headers.get('Sec-Fetch-Dest') === 'document') return new Response(null, { status: 303, headers: { ...privateHeaders, Location: '/auth/login' } });
+        return loginPage('', 401);
+      }
+      if (path.startsWith('/api/')) return await handleApi(req, env);
+      const response = await env.ASSETS.fetch(req);
+      const secured = new Response(response.body, response);
+      for (const [name, value] of Object.entries(privateHeaders)) secured.headers.set(name, value);
+      return secured;
     } catch { return error('服務暫時無法使用，請稍後再試。', 503); }
   },
 };

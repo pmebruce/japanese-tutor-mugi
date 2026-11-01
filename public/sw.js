@@ -1,4 +1,4 @@
-const CACHE = 'mugi-mobile-v1';
+const CACHE = 'mugi-mobile-v2';
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', event => event.waitUntil((async () => {
   for (const name of await caches.keys()) if (name.startsWith('mugi-mobile-') && name !== CACHE) await caches.delete(name);
@@ -12,7 +12,7 @@ self.addEventListener('fetch', event => {
     const cached = await caches.match(request);
     if (cached) return cached;
     const response = await fetch(request);
-    if (response.ok && !response.redirected) { const cache = await caches.open(CACHE); await cache.put(request, response.clone()); }
+    if (response.ok && !response.redirected && !response.headers.get('Content-Type')?.includes('text/html')) { const cache = await caches.open(CACHE); await cache.put(request, response.clone()); }
     return response;
   })());
 });

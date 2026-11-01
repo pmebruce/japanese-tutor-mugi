@@ -1,7 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import worker, { handleApi, prepareCall, UsageLimiter, type Storage } from './index';
 
+import { createSession } from './passwordAuth';
+
 const code = 'example-personal-code';
+const token = await createSession(code, 'https://mugi.example');
 function environment() {
   const records = new Map<string, unknown>();
   let lock: Promise<unknown> = Promise.resolve();
@@ -20,7 +23,7 @@ function environment() {
   };
 }
 const request = (path: string, body?: unknown, extra: Record<string, string> = {}) => new Request(`https://mugi.example${path}`, {
-  method: body === undefined ? 'GET' : 'POST', headers: { 'X-Mugi-Pair': code, 'Content-Type': 'application/json', ...extra },
+  method: body === undefined ? 'GET' : 'POST', headers: { Cookie: `__Host-mugi-session=${token}`, 'Content-Type': 'application/json', ...extra },
   ...(body === undefined ? {} : { body: JSON.stringify(body) }),
 });
 const chat = { messages: [{ role: 'user', content: '今日は学校に行きました。' }] };
@@ -31,17 +34,17 @@ function upstream(text: string, complete = true) {
 }
 
 describe('private mobile API', () => {
-  it('fails closed for pages and API without verified Cloudflare Access, including forged headers', async () => {
+  it('fails closed for pages and API without session, including forged identity and old pairing headers', async () => {
     const env = environment();
     for (const path of ['/', '/assets/app.js', '/api/chat/status']) {
-      const r = await worker.fetch(request(path, undefined, { 'Cf-Access-Jwt-Assertion': 'forged', 'oai-authenticated-user-email': 'owner@example.com' }), env);
-      expect(r.status).toBe(403);
+      const r = await worker.fetch(request(path, undefined, { Cookie: '', 'Cf-Access-Jwt-Assertion': 'forged', 'X-Mugi-Pair': code }), env);
+      expect(r.status).toBe(401);
     }
     expect(env.ASSETS.fetch).not.toHaveBeenCalled();
   });
-  it('rejects missing usage code and missing server secrets without contacting OpenAI', async () => {
+  it('rejects missing session and missing server secrets without contacting OpenAI', async () => {
     const env = environment(); const transport = vi.fn();
-    expect((await handleApi(new Request('https://mugi.example/api/chat/status'), env, transport)).status).toBe(403);
+    expect((await handleApi(new Request('https://mugi.example/api/chat/status'), env, transport)).status).toBe(401);
     expect((await handleApi(request('/api/chat', chat), { ...env, OPENAI_API_KEY: '' }, transport)).status).toBe(503);
     expect(transport).not.toHaveBeenCalled();
   });
@@ -92,5 +95,68 @@ describe('private mobile API', () => {
   it('keeps lookup and correction schemas separate', () => {
     expect(prepareCall('/api/lookup', { q: '你好怎麼說' }).name).toBe('mugi_lookup');
     expect(prepareCall('/api/chat/fix-tip', { tip: '修正' }).name).toBe('mugi_tip');
+  });
+});
+
+const loginRequest = (password: string, origin = 'https://mugi.example') => new Request('https://mugi.example/auth/login', {
+  method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/x-www-form-urlencoded', 'CF-Connecting-IP': '192.0.2.1' },
+  body: new URLSearchParams({ password }),
+});
+describe('private password login', () => {
+  it('serves only a password form before login and fails closed if unconfigured', async () => {
+    const env = environment();
+    const page = await worker.fetch(new Request('https://mugi.example/'), env);
+    expect(await page.text()).toContain('action="/auth/login"');
+    expect(env.ASSETS.fetch).not.toHaveBeenCalled();
+    const setup = await worker.fetch(new Request('https://mugi.example/'), { ...env, MUGI_ACCESS_CODE: '' });
+    expect(setup.status).toBe(503);
+  });
+  it('issues a protected cookie, unlocks assets and API, and clears it on logout', async () => {
+    const env = environment();
+    const login = await worker.fetch(loginRequest(code), env);
+    expect(login.status).toBe(303);
+    const cookie = login.headers.get('Set-Cookie')!;
+    expect(cookie).toContain('HttpOnly; Secure; SameSite=Strict');
+    expect(cookie).not.toContain(code);
+    const authHeaders = { Cookie: cookie.split(';')[0] };
+    const page = await worker.fetch(new Request('https://mugi.example/', { headers: authHeaders }), env);
+    expect(await page.text()).toBe('app');
+    expect(page.headers.get('Cache-Control')).toContain('no-store');
+    const status = await worker.fetch(new Request('https://mugi.example/api/mobile/status', { headers: authHeaders }), env);
+    expect(status.status).toBe(200);
+    const logout = await worker.fetch(new Request('https://mugi.example/auth/logout', { method: 'POST', headers: { ...authHeaders, Origin: 'https://mugi.example' } }), env);
+    expect(logout.status).toBe(303); expect(logout.headers.get('Set-Cookie')).toContain('Max-Age=0');
+    const after = await worker.fetch(new Request('https://mugi.example/api/mobile/status'), env);
+    expect(after.status).toBe(401);
+  });
+  it('rejects wrong passwords, forged, expired, wrong-site and rotated-password sessions', async () => {
+    const env = environment();
+    expect((await worker.fetch(loginRequest('wrong-password-123'), env)).status).toBe(401);
+    const { SignJWT } = await import('jose');
+    const key = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`mugi-session-v1:${code}`)));
+    const expired = await new SignJWT({}).setProtectedHeader({ alg: 'HS256' }).setSubject('owner').setIssuer('mugi-mobile').setAudience('https://mugi.example').setIssuedAt(1).setExpirationTime(2).sign(key);
+    for (const bad of ['forged', token.slice(0, -5) + 'abcde', expired, await createSession(code, 'https://other.example')]) {
+      expect((await worker.fetch(request('/api/chat/status', undefined, { Cookie: `__Host-mugi-session=${bad}` }), env)).status).toBe(401);
+    }
+    expect((await worker.fetch(request('/api/chat/status'), { ...env, MUGI_ACCESS_CODE: 'new-private-password-123' })).status).toBe(401);
+  });
+  it('blocks cross-site login/logout and bounds submitted form bytes', async () => {
+    const env = environment();
+    expect((await worker.fetch(loginRequest(code, 'https://attacker.example'), env)).status).toBe(403);
+    expect((await worker.fetch(new Request('https://mugi.example/auth/logout', { method: 'POST', headers: { Origin: 'https://attacker.example' } }), env)).status).toBe(403);
+    expect((await worker.fetch(loginRequest('x'.repeat(4000)), env)).status).toBe(400);
+    const login = await worker.fetch(new Request('https://mugi.example/auth/login'), env);
+    expect(login.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+  });
+  it('limits concurrent login guesses durably and allows login after the window expires', async () => {
+    const env = environment();
+    try {
+      vi.useFakeTimers();
+      const attempts = await Promise.all(Array.from({ length: 12 }, () => worker.fetch(loginRequest('wrong-password-123'), env)));
+      expect(attempts.filter(r => r.status === 429)).toHaveLength(4);
+      expect((await worker.fetch(loginRequest(code), env)).status).toBe(429);
+      vi.setSystemTime(Date.now() + 16 * 60000);
+      expect((await worker.fetch(loginRequest(code), env)).status).toBe(303);
+    } finally { vi.useRealTimers(); }
   });
 });

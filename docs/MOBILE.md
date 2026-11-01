@@ -4,35 +4,32 @@
 
 ## 使用方式
 
-- Safari／Chrome 打開自己的 Worker 網址，先使用允許的擁有者 email 登入 Cloudflare Access。
-- 第一次使用輸入私人使用碼；這台瀏覽器會記住。可在設定內忘記使用碼。
+- Safari／Chrome 打開自己的 Worker 網址，輸入私人密碼。無須開通 Cloudflare Zero Trust。
+- 登入保留 30 天，密碼不存進 localStorage；使用 Secure、HttpOnly、SameSite=Strict 的簽章 Cookie。可在設定登出這台裝置。
 - iPhone：分享 → 加入主畫面。Android：Chrome 選單 → 安裝應用程式／加入主畫面。
 - 中文與日文朗讀使用裝置內建聲音，不啟用本機 VOICEVOX 或另外計費的雲端語音。
 - API 文字對話另外計費，ChatGPT Plus 訂閱不抵 API 用量。
 
 ## 部署到自己的 Cloudflare
 
-1. Workers & Pages → 建立 Worker → 連接 GitHub，選擇 `pmebruce/japanese-tutor-mugi`，生產分支務必選 `mobile-private`（手機版程式位於此分支）。
+1. Workers & Pages → 建立 Worker → 連接 GitHub，選擇 `pmebruce/japanese-tutor-mugi`，生產分支務必選 `mobile-private`。
 2. 建置命令：`npm run build:mobile`。部署命令：`npx wrangler deploy`。根目錄保持專案根目錄。
 3. 使用 `wrangler.jsonc`：Worker 是 `mugi-mobile`，靜態資產是 `dist/`，並自動建立 SQLite Durable Object `UsageLimiter`。
-4. 為這個 Worker 的正式 hostname 建立 Cloudflare Access Self-hosted application。只允許擁有者的一個 email；不要用 Everyone、Bypass 或 Service Auth 政策。登入方式可選 email 一次性驗證碼。停用預覽網址，本專案已設 `preview_urls: false`。
+4. 啟用正式 workers.dev 網址。不需要 Zero Trust、Access application 或 Access 相關變數。預覽網址已由 `preview_urls: false` 停用。
 5. 在 Worker 的 Variables and Secrets 加入以下設定，再部署一次使設定生效：
 
 | 名稱 | 類型 | 內容 |
 |---|---|---|
 | `OPENAI_API_KEY` | Secret | 此 App 專用的 API 金鑰 |
-| `MUGI_ACCESS_CODE` | Secret | 自選至少 12 字、最多 64 字的私人使用碼 |
-| `ACCESS_TEAM_DOMAIN` | 文字 | 自己的 `xxx.cloudflareaccess.com`，不要含 https 或路徑 |
-| `ACCESS_AUD` | 文字 | Access application 的 Application Audience (AUD) tag |
-| `MUGI_OWNER_EMAIL` | 文字 | 唯一允許使用的擁有者 email |
+| `MUGI_ACCESS_CODE` | Secret | 至少 16 字、最多 128 字的私人密碼，建議密碼管理器產生至少 20 字隨機密碼 |
 | `OPENAI_MODEL` | 文字 | 預設 `gpt-4.1-mini` |
 | `MUGI_DAILY_REQUESTS` | 文字 | 預設 `100`，可設 1–1000 |
 
-API 金鑰只能放 Secret，不能放到 `VITE_`、原始碼或 GitHub。任何設定未完成，Worker 都應保持拒絕存取，不要移除 Access 驗證。
+API 金鑰只能放 Secret，不能放到 `VITE_`、原始碼或 GitHub。私人密碼未設定時，Worker 保持拒絕存取。沒有登入時只提供密碼表單，不開放 App、靜態資產或 API；即使知道網址也需要密碼。知道密碼的人都能登入，請勿分享。
 
 ## 建置分支排查
 
-若日誌顯示 `Missing script: build:mobile`，先查看該筆建置的分支標籤。`main` 不包含手機版建置命令；請在「設定 → 建置」將生產分支儲存為 `mobile-private`，再由此分支的新提交觸發建置。舊的 `main` 失敗紀錄仍會保留；不要重試那筆舊紀錄，應確認新的建置標籤是 `mobile-private`。
+若顯示 `Missing script: build:mobile`，確認生產分支已儲存為 `mobile-private`，由該分支的新提交觸發建置。不要重試舊 `main` 失敗紀錄；新建置的標籤應是 `mobile-private`。
 
 ## 驗證
 
@@ -50,7 +47,9 @@ npx wrangler deploy --dry-run
 - 同一個私人安裝共用持久化的每日請求計數，台灣時間午夜重計；每分鐘最多 12 次，單次輸出最多 1600 tokens。
 - 聊天、速查、錯題判斷及提醒重寫都計次。送到上游失敗也保守計次，不會因重新部署或換手機而重置。
 - 這是請求次數上限，不是固定美元花費保證；仍以 OpenAI 帳單和 Platform 的可用餘額為準。
-- Worker 驗證 Access JWT 的簽章、issuer、audience、到期時間及 owner email。只有網址或偽造的身份標頭不會獲得存取。
+- Worker 驗證登入 Cookie 的簽章、來源網址與有效期；不接受舊配對標頭或偽造的 Access 身份標頭。
+- 登入嘗試持久化限速：每個來源 IP 每 15 分鐘最多 8 次、整個安裝最多 60 次。成功與失敗嘗試皆計數。
+- 在 Cloudflare 更改 `MUGI_ACCESS_CODE` 並重新部署後，所有舊登入立即失效。一般登出只清除此裝置 Cookie；遺失裝置時請更換密碼。
 - 聊天與圖片仍存在各裝置瀏覽器，不跨裝置同步。聊天文字會送到 OpenAI，Responses 請求設 `store: false`。
 - 雲端版沒有原版的伺服器 kuromoji 補讀音；讀音由模型標示，學習時仍需核對。
 - API、身份回應與 HTML 不由 service worker 快取；只有登入後取得的靜態素材可快取。離線時不能取得新的 AI 回覆。

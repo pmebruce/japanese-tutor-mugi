@@ -1,4 +1,4 @@
-> **個人手機版（pmebruce）**：本分支新增 OpenAI API + Cloudflare Workers 部署，不需要家裡電腦開機。只開放擁有者使用，部署前必須設定 Cloudflare Access；未設定時預設拒絕所有訪客。詳見 [手機版部署說明](docs/MOBILE.md)。原作者的 MIT 授權與說明保留如下。
+> **個人手機版（pmebruce）**：本分支新增 OpenAI API + Cloudflare Workers 部署，不需要家裡電腦開機。以私人密碼保護頁面與 API，不需要開通 Zero Trust。部署前必須設定私人密碼 Secret；未設定時預設拒絕所有訪客。詳見 [手機版部署說明](docs/MOBILE.md)。原作者的 MIT 授權與說明保留如下。
 
 **繁體中文** | [English](README.en.md)
 

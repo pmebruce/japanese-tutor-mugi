@@ -460,7 +460,7 @@ export default function TutorView() {
             {streamText && <li className="her">{rubyNodes(streamText)}</li>}
           </>}
           notes={[
-            !ready && claude !== null && (CLOUD_MODE ? '請先輸入私人使用碼，或檢查網路連線。' : '需要 AI 服務：請到設定的「AI 服務」設定 Claude 金鑰，或登入 ChatGPT'),
+            !ready && claude !== null && (CLOUD_MODE ? '請檢查連線設定，或重新登入。' : '需要 AI 服務：請到設定的「AI 服務」設定 Claude 金鑰，或登入 ChatGPT'),
             note || voice.note || (mic.listening ? `聆聽中…（${sttLang === 'ja-JP' ? '日文' : '中文'}）` : ''),
           ]}
           pill={voice.active ? { phase: voice.phase, label: VOICE_LABEL[voice.phase], onStop: voice.stop } : undefined}

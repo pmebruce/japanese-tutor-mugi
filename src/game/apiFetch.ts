@@ -36,12 +36,17 @@ export function onPairNeeded(listener: () => void): () => void {
 
 /** fetch for an /api route: the pairing header is added when a code is stored; a pair_required refusal notifies the banner */
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
-  const code = pairCode();
+  if (CLOUD_MODE) setPairCode(''); // Password stays server-side; only the HttpOnly session cookie is sent.
+  const code = CLOUD_MODE ? '' : pairCode();
   const sent: RequestInit = code
     ? { ...init, headers: { ...((init.headers as Record<string, string> | undefined) ?? {}), [PAIR_HEADER]: code } }
     : init;
   const response = await fetch(input, sent);
-  if (response.status === 403 && input.startsWith('/api')) {
+  if (CLOUD_MODE && response.status === 401) {
+    const body = await response.clone().json().catch(() => null);
+    if (body?.error === 'login_required') location.assign('/auth/login');
+  }
+  if (!CLOUD_MODE && response.status === 403 && input.startsWith('/api')) {
     const body = (await response.clone().json().catch(() => null)) as { error?: unknown } | null;
     if (body?.error === 'pair_required') for (const listener of pairListeners) listener();
   }
