@@ -1,3 +1,4 @@
+import { CLOUD_MODE } from '../game/mobile';
 // The ⚙️ settings sheet parts of 日語家教 (TutorView): the sheet shell, the 聲音 section
 // (mute, volumes, 朗讀回覆, the per-language voice groups), the 對話 section (the chat count and its clear) and the 用量 section.
 // The view keeps its own rows (名字, 其他) and passes them in as children.
@@ -72,10 +73,10 @@ export function SoundSection({ audio, tts, cloud, volumes = VOLUME_ROWS.map(([k]
       ))}
       <label className="as-row"><span>朗讀回覆<small>她的回覆用語音念出來（嘴巴會跟著動）</small></span>
         <input type="checkbox" checked={tts.on} disabled={!ttsAvailable()} onChange={(e) => setTtsSettings({ on: e.target.checked })} /></label>
-      <div className="as-lang-note">{cloud === null ? <small>雲端語音檢查中…</small> : (!cloud.azure || !cloud.google) && <small>Azure／Google 需要在 .env.local 填金鑰</small>}</div>
+      <div className="as-lang-note">{CLOUD_MODE ? <small>使用手機內建語音，不另收語音服務費。</small> : cloud === null ? <small>雲端語音檢查中…</small> : (!cloud.azure || !cloud.google) && <small>Azure／Google 需要在 .env.local 填金鑰</small>}</div>
       <LangVoiceGroup title="中文" lang="zh" tts={tts} cloud={cloud} />
       <LangVoiceGroup title="日文" lang="ja" tts={tts} cloud={cloud} />
-      <div className="as-lang-note"><small>語速與音調在本機套用，雲端語音一律以原速合成（快取不會因調整而重算）。</small></div>
+      <div className="as-lang-note"><small>語速與音調可分別調整；請先按試聽確認聲音。</small></div>
     </>
   );
 }

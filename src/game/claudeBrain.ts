@@ -1,3 +1,4 @@
+import { CLOUD_MODE } from './mobile';
 // 日語家教 Claude brain (client side). The phone never holds the API key: askClaude posts the chat to the dev server's
 // /api/chat (server/claudeChat.ts) and reads the Server-Sent Events stream. Her reply is a JSON object (CHAT_REPLY_SCHEMA):
 // the stream is read while it arrives (ReplyJsonParser), so the text shows as it is written, and each Japanese segment goes
@@ -347,7 +348,7 @@ async function errorText(res: Response): Promise<string> {
     const j = (await res.json()) as { message?: unknown };
     if (typeof j.message === 'string') return j.message;
   } catch { /* not JSON */ }
-  return `Claude 服務錯誤（${res.status}）`;
+  return `${CLOUD_MODE ? 'AI' : 'Claude'} 服務錯誤（${res.status}）`;
 }
 
 // ---------------------------------------------------------------- the call
@@ -395,7 +396,7 @@ async function streamClaude(args: AskClaudeArgs, id: number, signal?: AbortSigna
       signal,
     });
   } catch {
-    throw new Error('連不上 Claude');
+    throw new Error(CLOUD_MODE ? '連不上 AI 服務' : '連不上 Claude');
   }
   if (!res.ok || !res.body) throw new Error(await errorText(res));
 
@@ -449,7 +450,7 @@ async function streamClaude(args: AskClaudeArgs, id: number, signal?: AbortSigna
   const doneValue = finalText?.trim() ? parsePartialJson(finalText) : undefined;
   const fields = doneValue !== undefined ? readReplyValue(doneValue) : parser.fields;
   const reply = viewOf(fields, args.mode, finalTipRewrite);
-  if (!reply.text) throw new Error('Claude 沒有回覆內容');
+  if (!reply.text) throw new Error(CLOUD_MODE ? 'AI 沒有回覆內容' : 'Claude 沒有回覆內容');
   args.onDelta?.(reply.text);
   return reply;
 }

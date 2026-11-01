@@ -16,12 +16,13 @@ export function PairBanner() {
     setPairCode(t);
     setCode('');
     setOpen(false);
+    location.reload();
   };
   return (
     <form className="pair-banner" role="alert" onSubmit={submit}>
       <label className="pair-banner-label">
         <span>{PAIR_PROMPT}</span>
-        <input value={code} onChange={(e) => setCode(e.target.value)} maxLength={64} autoComplete="off" autoCapitalize="none"
+        <input type="password" value={code} onChange={(e) => setCode(e.target.value)} maxLength={64} autoComplete="off" autoCapitalize="none"
           spellCheck={false} aria-label="配對碼" />
       </label>
       <button type="submit" disabled={!code.trim()}>送出</button>

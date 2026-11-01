@@ -1,10 +1,11 @@
+import { CLOUD_MODE } from './mobile.ts';
 // The one way the app calls the dev server's /api routes. On a LAN connection (the server runs with MUGI_LAN=1 and the phone reaches
 // it by the PC's IP address) every /api request needs the pairing code the server printed once in its console: the code is typed
 // once (PairBanner), kept in this browser's localStorage, and sent in the X-Mugi-Pair header on every call. Loopback and Tailscale
 // names never need it, and a request without a code is simply sent without the header (the server then refuses it only on a LAN
 // address). When the server answers 403 with error "pair_required", the banner asks for the code.
 export const PAIR_HEADER = 'X-Mugi-Pair';
-export const PAIR_PROMPT = '輸入電腦終端機顯示的配對碼';
+export const PAIR_PROMPT = CLOUD_MODE ? '輸入你的私人使用碼' : '輸入電腦終端機顯示的配對碼';
 const PAIR_KEY = 'mugi.pair.v1';
 
 /** the stored pairing code ('' when none, or when the browser keeps no storage) */

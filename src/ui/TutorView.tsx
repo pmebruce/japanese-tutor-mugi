@@ -1,3 +1,5 @@
+import { CLOUD_MODE } from '../game/mobile';
+import { MobileSection } from './MobileSection';
 // 日語家教 (the tutor mode): a pure Japanese chat with a 2D portrait of the active character (人物: むぎ the hamster, 結衣, 悠真, or one
 // the player added). The replies come from Claude in teacher mode (game/claudeBrain askClaude); the chat, the 小提醒 and the notebook,
 // 速查, the mic and the voice loop are the shared pieces. Settings live under their own key (game/tutor.ts); each character has its
@@ -458,7 +460,7 @@ export default function TutorView() {
             {streamText && <li className="her">{rubyNodes(streamText)}</li>}
           </>}
           notes={[
-            !ready && claude !== null && '需要 AI 服務：請到設定的「AI 服務」設定 Claude 金鑰，或登入 ChatGPT',
+            !ready && claude !== null && (CLOUD_MODE ? '請先輸入私人使用碼，或檢查網路連線。' : '需要 AI 服務：請到設定的「AI 服務」設定 Claude 金鑰，或登入 ChatGPT'),
             note || voice.note || (mic.listening ? `聆聽中…（${sttLang === 'ja-JP' ? '日文' : '中文'}）` : ''),
           ]}
           pill={voice.active ? { phase: voice.phase, label: VOICE_LABEL[voice.phase], onStop: voice.stop } : undefined}
@@ -528,14 +530,16 @@ export default function TutorView() {
         <SettingsSheet theme="dark" onClose={() => setSheet(null)}>
           {/* the shared 聲音 section; 日語家教 has no sound effects, so its volume rows are 音樂 and 語音 */}
           <SoundSection audio={audio} tts={tts} cloud={cloud} volumes={['music', 'voice']} />
+          {CLOUD_MODE ? <MobileSection /> : <>
           <CloudKeysSection onSaved={keysSaved} />
           <AiServiceSection theme="dark" providers={settings.providers} openaiModel={settings.openaiModel}
             claudeOk={claude === null ? null : claude.ok} chatgpt={chatgpt} onChange={(patch) => setPrefs(patch)} onRefresh={refreshChatGpt} onKeysSaved={keysSaved} />
           <BudgetSection />
           <ModelSection theme="dark" chatModel={settings.chatModel} helperModel={settings.helperModel}
             serverModel={claude === null ? null : claude.model} onChange={(patch) => setPrefs(patch)} />
+          </>}
           <ChatDataSection count={chat.length} onClear={clearChat} />
-          <UsageSection />
+          {!CLOUD_MODE && <UsageSection />}
         </SettingsSheet>
       )}
       {sheet === 'tips' && <TipsSheet theme="dark" onClose={() => setSheet(null)} />}

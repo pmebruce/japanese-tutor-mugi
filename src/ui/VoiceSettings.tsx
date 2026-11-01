@@ -1,3 +1,4 @@
+import { CLOUD_MODE } from '../game/mobile';
 // Voice settings used by 日語家教 (ui/TutorView): the per-language voice group of ⚙️ 聲音
 // (engine, voice, 語速, 音調, the VOICEVOX switch and credit).
 import { cloudDefaultVoice, cloudVoiceList, type CloudEngine } from '../game/cloudTts';
@@ -55,14 +56,14 @@ export function LangVoiceGroup({ title, lang, tts, cloud }: { title: string; lan
       <h4>{title}</h4>
       <div className="as-row as-stack"><span>語音引擎</span>
         <div className="as-seg" role="radiogroup" aria-label={`${title}語音引擎`}>
-          {ENGINE_CHOICES[lang].map(({ engine, label }) => (
+          {ENGINE_CHOICES[lang].filter(v => !CLOUD_MODE || v.engine === 'browser').map(({ engine, label }) => (
             <button key={engine} role="radio" aria-checked={s.engine === engine} className={s.engine === engine ? 'on' : ''}
-              disabled={engine !== 'browser' && !cloud?.[engine]} onClick={() => setLangSettings(lang, { engine })}>{label}</button>
+              disabled={engine !== 'browser' && !cloud?.[engine]} onClick={() => setLangSettings(lang, { engine })}>{CLOUD_MODE && engine === 'browser' ? '手機內建' : label}</button>
           ))}
         </div>
       </div>
-      {lang === 'ja' && cloud && !cloud.voicevox && <div className="as-row"><span><small>電腦上的 VOICEVOX 沒開</small></span></div>}
-      {lang === 'ja' && <VoicevoxSwitch />}
+      {!CLOUD_MODE && lang === 'ja' && cloud && !cloud.voicevox && <div className="as-row"><span><small>電腦上的 VOICEVOX 沒開</small></span></div>}
+      {!CLOUD_MODE && lang === 'ja' && <VoicevoxSwitch />}
       {s.engine === 'browser' ? (ttsSupported()
         ? <VoiceRow label="聲音" lang={lang} value={s.voices.browser ?? ''} onChange={(v) => setVoice('browser', v)} />
         : <div className="as-row"><span>聲音<small>此瀏覽器不支援語音合成</small></span></div>)
