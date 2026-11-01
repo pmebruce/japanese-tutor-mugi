@@ -87,10 +87,20 @@ export function prepareCall(path: string, body: Record<string, unknown>) {
   throw new Error('沒有這個功能。');
 }
 function upstreamMessage(status: number, code?: string): string {
-  if (code === 'insufficient_quota' || code === 'credit_balance_exhausted') return 'OpenAI API 尚無可用額度，請到 Platform 加值或檢查帳單設定。Plus 月費不包含 API 用量。';
-  if (status === 401 || status === 403) return 'AI 連線設定需要更新，請由擁有者檢查 Cloudflare Secret。';
-  if (status === 429) return 'AI 目前額度不足或請求太頻繁，請稍後再試。';
+  if (['insufficient_quota', 'credit_balance_exhausted', 'billing_hard_limit_reached', 'usage_limit_reached'].includes(code ?? '')) return 'OpenAI API 尚無可用額度，請到 Platform 加值或檢查帳單設定。Plus 月費不包含 API 用量。';
+  if (code === 'invalid_api_key' || status === 401 || status === 403) return 'AI 連線設定需要更新，請由擁有者檢查 Cloudflare Secret。';
+  if (['model_not_found', 'invalid_json_schema', 'unsupported_value', 'unsupported_parameter'].includes(code ?? '')) return 'AI 模型或回覆格式設定不相容，請檢查模型設定。';
+  if (code === 'rate_limit_exceeded' || status === 429) return 'AI 目前額度不足或請求太頻繁，請稍後再試。';
   return 'AI 暫時無法回應，請稍後再試。';
+}
+
+class MobileStreamError extends Error {}
+function streamEventError(ev: Record<string, unknown>): MobileStreamError {
+  const response = ev.response as { error?: { code?: string }; incomplete_details?: { reason?: string } } | undefined;
+  const nested = ev.error as { code?: string } | undefined;
+  const code = response?.error?.code || nested?.code || (typeof ev.code === 'string' ? ev.code : undefined);
+  if (response?.incomplete_details?.reason === 'max_output_tokens') return new MobileStreamError('AI 回覆太長，超過本次輸出上限。請改問較短的問題。');
+  return new MobileStreamError(code ? upstreamMessage(0, code) : 'AI 服務回傳未完成的回覆，請稍後再試。');
 }
 
 export async function handleApi(req: Request, env: Env, fetcher: typeof fetch = fetch): Promise<Response> {
@@ -144,6 +154,7 @@ export async function handleApi(req: Request, env: Env, fetcher: typeof fetch = 
     const body = await response.json().catch(() => ({})) as { error?: { code?: string } };
     return error(upstreamMessage(response.status, body.error?.code), response.status === 429 ? 429 : 502);
   }
+  const streamMessage = (e: unknown): string => e instanceof MobileStreamError ? e.message : controller.signal.aborted ? 'AI 回覆逾時或連線已取消，請稍後再試。' : 'AI 回覆中斷或格式不完整，請再試一次。';
   async function collect(onDelta: (s: string) => void): Promise<string> {
     let result = ''; let completed = false;
     try {
@@ -154,7 +165,8 @@ export async function handleApi(req: Request, env: Env, fetcher: typeof fetch = 
           completed = true;
           await usage(env, 'record', { inputTokens: r?.usage?.input_tokens, outputTokens: r?.usage?.output_tokens });
         }
-        if (['error', 'response.failed', 'response.incomplete'].includes(String(ev.type))) throw new Error('AI 回覆未完成，請再試一次。');
+        if (['error', 'response.failed', 'response.incomplete'].includes(String(ev.type))) throw streamEventError(ev);
+        if (ev.type === 'response.refusal.delta') throw new MobileStreamError('AI 無法回答這個內容，請換個日語練習問題。');
       }
       if (!completed || !result) throw new Error('AI 連線中斷，請再試一次。');
       JSON.parse(result); // Incomplete JSON is never reported as a successful answer.
@@ -168,7 +180,7 @@ export async function handleApi(req: Request, env: Env, fetcher: typeof fetch = 
       async start(sink) {
         const send = (value: unknown) => { if (!closed) sink.enqueue(encoder.encode(`data: ${JSON.stringify(value)}\n\n`)); };
         try { const result = await collect(text => send({ type: 'delta', text })); send({ type: 'done', text: result }); }
-        catch { send({ type: 'error', message: 'AI 回覆中斷或逾時，請再試一次。' }); }
+        catch (e) { send({ type: 'error', message: streamMessage(e) }); }
         finally { if (!closed) { closed = true; sink.close(); } }
       },
       cancel() { closed = true; controller.abort(); },
@@ -178,7 +190,7 @@ export async function handleApi(req: Request, env: Env, fetcher: typeof fetch = 
   try {
     const raw = await collect(() => {}); const answer = JSON.parse(raw);
     return path === '/api/lookup' ? json({ ok: true, answer, raw }) : path === '/api/chat/fix-tip' ? json({ ok: true, tip: answer.tip }) : json(answer);
-  } catch { return error('AI 回覆中斷或逾時，請再試一次。', 502); }
+  } catch (e) { return error(streamMessage(e), 502); }
 }
 
 export default {

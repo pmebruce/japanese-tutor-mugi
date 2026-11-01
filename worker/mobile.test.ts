@@ -163,3 +163,30 @@ describe('private password login', () => {
     } finally { vi.useRealTimers(); }
   });
 });
+
+describe('upstream failures after HTTP 200', () => {
+  const failed = (ev: unknown) => vi.fn(async () => new Response(`data: ${JSON.stringify(ev)}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } }));
+  it('preserves streamed credit failures for chat and lookup without exposing upstream secrets', async () => {
+    for (const event of [
+      { type: 'error', code: 'insufficient_quota', message: 'secret-upstream-details' },
+      { type: 'response.failed', response: { error: { code: 'credit_balance_exhausted', message: 'secret-upstream-details' } } },
+      { type: 'error', error: { code: 'billing_hard_limit_reached' } },
+    ]) {
+      for (const [path, body] of [['/api/chat', chat], ['/api/lookup', { q: '你好' }]] as const) {
+        const response = await handleApi(request(path, body), environment(), failed(event));
+        const text = await response.text();
+        expect(text).toContain('API 尚無可用額度'); expect(text).toContain('Plus');
+        expect(text).not.toContain('secret-upstream-details'); expect(text).not.toContain('"type":"done"');
+      }
+    }
+  });
+  it('distinguishes stream rate limits and output length limits from missing credits', async () => {
+    for (const [event, message] of [
+      [{ type: 'error', code: 'rate_limit_exceeded' }, '請求太頻繁'],
+      [{ type: 'response.incomplete', response: { incomplete_details: { reason: 'max_output_tokens' } } }, '超過本次輸出上限'],
+    ] as const) {
+      const response = await handleApi(request('/api/chat', chat), environment(), failed(event));
+      expect(await response.text()).toContain(message);
+    }
+  });
+});
