@@ -12,7 +12,7 @@
 
 ## 部署到自己的 Cloudflare
 
-1. Workers & Pages → 建立 Worker → 連接 GitHub，選擇 `pmebruce/japanese-tutor-mugi`。
+1. Workers & Pages → 建立 Worker → 連接 GitHub，選擇 `pmebruce/japanese-tutor-mugi`，生產分支務必選 `mobile-private`（手機版程式位於此分支）。
 2. 建置命令：`npm run build:mobile`。部署命令：`npx wrangler deploy`。根目錄保持專案根目錄。
 3. 使用 `wrangler.jsonc`：Worker 是 `mugi-mobile`，靜態資產是 `dist/`，並自動建立 SQLite Durable Object `UsageLimiter`。
 4. 為這個 Worker 的正式 hostname 建立 Cloudflare Access Self-hosted application。只允許擁有者的一個 email；不要用 Everyone、Bypass 或 Service Auth 政策。登入方式可選 email 一次性驗證碼。停用預覽網址，本專案已設 `preview_urls: false`。
@@ -29,6 +29,10 @@
 | `MUGI_DAILY_REQUESTS` | 文字 | 預設 `100`，可設 1–1000 |
 
 API 金鑰只能放 Secret，不能放到 `VITE_`、原始碼或 GitHub。任何設定未完成，Worker 都應保持拒絕存取，不要移除 Access 驗證。
+
+## 建置分支排查
+
+若日誌顯示 `Missing script: build:mobile`，先查看該筆建置的分支標籤。`main` 不包含手機版建置命令；請在「設定 → 建置」將生產分支儲存為 `mobile-private`，再由此分支的新提交觸發建置。舊的 `main` 失敗紀錄仍會保留；不要重試那筆舊紀錄，應確認新的建置標籤是 `mobile-private`。
 
 ## 驗證
 
