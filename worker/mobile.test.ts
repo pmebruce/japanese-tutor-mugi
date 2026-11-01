@@ -128,6 +128,7 @@ describe('private password login', () => {
     expect(logout.status).toBe(303); expect(logout.headers.get('Set-Cookie')).toContain('Max-Age=0');
     const after = await worker.fetch(new Request('https://mugi.example/api/mobile/status'), env);
     expect(after.status).toBe(401);
+    expect(after.headers.get('Content-Type')).toBe('application/json; charset=utf-8');
   });
   it('rejects wrong passwords, forged, expired, wrong-site and rotated-password sessions', async () => {
     const env = environment();
@@ -147,6 +148,8 @@ describe('private password login', () => {
     expect((await worker.fetch(loginRequest('x'.repeat(4000)), env)).status).toBe(400);
     const login = await worker.fetch(new Request('https://mugi.example/auth/login'), env);
     expect(login.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'");
+    // Native form submissions need a real same-origin Origin for the CSRF check.
+    expect(login.headers.get('Referrer-Policy')).toBe('same-origin');
   });
   it('limits concurrent login guesses durably and allows login after the window expires', async () => {
     const env = environment();

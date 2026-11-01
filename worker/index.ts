@@ -20,7 +20,7 @@ interface Env {
 }
 type Ledger = { day: string; requests: number; minute: number; minuteRequests: number; inputTokens: number; outputTokens: number };
 const headers = { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
-const json = (value: unknown, status = 200) => Response.json(value, { status, headers });
+const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { ...headers, 'Content-Type': 'application/json; charset=utf-8' } });
 const error = (message: string, status = 400) => json({ ok: false, message }, status);
 const today = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Taipei' }).format(new Date());
 const dailyLimit = (env: Env) => Math.max(1, Math.min(1000, Number(env.MUGI_DAILY_REQUESTS) || 100));
@@ -189,7 +189,7 @@ export default {
       if (path === '/auth/login') {
         if (req.method === 'GET') return loginPage();
         if (req.method !== 'POST') return error('不支援此操作。', 405);
-        if (!sameOrigin(req)) return error('不接受跨網站請求。', 403);
+        if (!sameOrigin(req)) return loginPage('登入頁已更新，請重新整理後再登入。', 403);
         // Cloudflare supplies CF-Connecting-IP; never trust client X-Forwarded-For.
         const ip = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(req.headers.get('CF-Connecting-IP') ?? 'unknown'))), b => b.toString(16).padStart(2, '0')).join('');
         const allowed = await usage(env, 'login', { ip });

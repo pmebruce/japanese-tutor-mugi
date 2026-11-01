@@ -5,7 +5,8 @@ const AGE = 30 * 24 * 60 * 60;
 export const privateHeaders = {
   'Cache-Control': 'private, no-store',
   'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'no-referrer',
+  // HTML form POSTs under no-referrer carry Origin: null and fail the CSRF check.
+  'Referrer-Policy': 'same-origin',
   'X-Frame-Options': 'DENY',
 };
 export const passwordConfigured = (password?: string): password is string => !!password && password.length >= 16 && password.length <= 128;
