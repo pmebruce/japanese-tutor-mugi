@@ -1,3 +1,4 @@
+import { CLOUD_MODE } from './mobile';
 // Her voice: text-to-speech on the browser's speechSynthesis, driven by the reply bus (game/replyBus.ts).
 //
 // Replies arrive as start / delta / done / error events. A reply is cut into sentences (。！？!? … and newlines), each
@@ -61,7 +62,7 @@ function normLang(v: unknown, lang: Lang, fallbackEngine: TtsEngine = 'browser')
   for (const e of ENGINES) if (str(vs[e])) voices[e] = str(vs[e]);
   const engine = o.engine === undefined ? fallbackEngine : engineOf(o.engine);
   return {
-    engine: lang === 'zh' && engine === 'voicevox' ? 'browser' : engine,
+    engine: CLOUD_MODE || (lang === 'zh' && engine === 'voicevox') ? 'browser' : engine,
     rate: clampRate(num(o.rate, DEFAULT_RATE)),
     pitch: clampPitch(num(o.pitch, DEFAULT_PITCH)),
     voices,

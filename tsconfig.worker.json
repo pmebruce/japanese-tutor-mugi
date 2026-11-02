@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "target": "ES2023", "lib": ["ES2023", "DOM"], "module": "ESNext", "moduleResolution": "bundler", "allowImportingTsExtensions": true, "noEmit": true, "skipLibCheck": true, "strict": true },
+  "include": ["worker/**/*.ts"]
+}

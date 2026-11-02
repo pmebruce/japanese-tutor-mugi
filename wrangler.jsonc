@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mugi-mobile",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "preview_urls": false,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "vars": { "OPENAI_MODEL": "gpt-4.1-mini", "MUGI_DAILY_REQUESTS": "100" },
+  "durable_objects": { "bindings": [{ "name": "USAGE", "class_name": "UsageLimiter" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["UsageLimiter"] }],
+  "observability": { "enabled": false }
+}

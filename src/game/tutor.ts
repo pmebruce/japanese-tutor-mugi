@@ -1,3 +1,4 @@
+import { CLOUD_MODE } from './mobile';
 // 日語家教 (the tutor mode): its own settings and its own chat histories, in their own localStorage keys, so the chats never mix
 // with anything else. The settings hold the characters (人物): up to TUTOR_CHARACTERS_MAX of them, the three built-in ones first
 // (むぎ, 結衣, 悠真) and the added ones after. The active one is the one on screen and in the chat; each has its own chat history
@@ -291,7 +292,7 @@ export function migrateTutor(raw: unknown): TutorSettings {
     sttLang: o.sttLang === 'zh-TW' ? 'zh-TW' : 'ja-JP',
     chatModel: isChatModelId(o.chatModel) ? o.chatModel : '',
     helperModel: isChatModelId(o.helperModel) ? o.helperModel : DEFAULT_TUTOR.helperModel,
-    providers: parseProviderList(o.providers) ?? [...DEFAULT_PROVIDERS],
+    providers: CLOUD_MODE ? ['anthropic'] : parseProviderList(o.providers) ?? [...DEFAULT_PROVIDERS],
     openaiModel: cleanOpenaiModel(o.openaiModel),
     background,
     customBackgrounds: added,
